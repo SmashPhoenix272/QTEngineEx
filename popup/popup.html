@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QTEngineEx</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body {
+      width: 320px;
+      background: #121212;
+      color: #E0E0E0;
+    }
+
+    .container {
+      position: relative;
+      padding: 16px;
+      min-height: 200px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #333333;
+    }
+
+    .logo-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-section img {
+      width: 24px;
+      height: 24px;
+    }
+
+    .logo-section h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #4CAF50;
+    }
+
+    .settings-icon {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+      fill: #E0E0E0;
+    }
+
+    .settings-icon:hover {
+      opacity: 1;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 24px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #333333;
+      transition: .3s;
+      border-radius: 24px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #E0E0E0;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: #4CAF50;
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(24px);
+    }
+
+    .option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #1E1E1E;
+      border-radius: 8px;
+      border: 1px solid #333333;
+    }
+
+    .option-label {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .translate-button {
+      width: 100%;
+      padding: 12px;
+      background: #4CAF50;
+      color: #000000;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      margin-bottom: 16px;
+    }
+
+    .translate-button:hover {
+      background: #45a049;
+    }
+
+    .keyboard-shortcuts {
+      padding: 12px;
+      background: #1E1E1E;
+      border-radius: 8px;
+      border: 1px solid #333333;
+      font-size: 12px;
+      color: #B0B0B0;
+    }
+
+    .keyboard-shortcuts p {
+      margin: 4px 0;
+    }
+
+    kbd {
+      background: #333333;
+      color: #E0E0E0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+
+    .settings-panel {
+      display: none;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1E1E1E;
+      padding: 16px;
+      border-top: 1px solid #333333;
+      transform: translateY(100%);
+      transition: transform 0.3s ease-out;
+      z-index: 1000;
+    }
+
+    .settings-panel.visible {
+      display: block;
+      transform: translateY(0);
+    }
+
+    .toggle-group {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding: 8px 0;
+    }
+
+    .toggle-label {
+      font-size: 14px;
+      color: #E0E0E0;
+    }
+
+    #serverUrlInput {
+      width: 100%;
+      padding: 8px 12px;
+      background: #121212;
+      color: #E0E0E0;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    #checkServerButton {
+      padding: 8px 12px;
+      background: #2A2A2A;
+      color: #E0E0E0;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      margin-right: 8px;
+    }
+
+    #checkServerButton:hover {
+      background: #333333;
+    }
+
+    .server-status-container {
+      margin-bottom: 12px;
+    }
+
+    .server-status-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .check-server-button {
+      flex: 1;
+      padding: 10px;
+      background: #1E1E1E;
+      color: #E0E0E0;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .check-server-button:hover {
+      background: #2A2A2A;
+    }
+
+    .server-status {
+      display: none;
+      padding: 8px;
+      margin-top: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .server-status.visible {
+      display: block;
+    }
+
+    .server-status.success {
+      background: rgba(76, 175, 80, 0.1);
+      color: #4CAF50;
+      border: 1px solid rgba(76, 175, 80, 0.2);
+    }
+
+    .server-status.error {
+      background: rgba(244, 67, 54, 0.1);
+      color: #f44336;
+      border: 1px solid rgba(244, 67, 54, 0.2);
+    }
+
+    .server-status.checking {
+      background: rgba(255, 193, 7, 0.1);
+      color: #FFC107;
+      border: 1px solid rgba(255, 193, 7, 0.2);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.6; }
+      50% { opacity: 1; }
+      100% { opacity: 0.6; }
+    }
+
+    .domain-management {
+      margin-top: 16px;
+    }
+
+    .domain-input-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    #domain-input {
+      padding: 10px;
+      background: #121212;
+      color: #E0E0E0;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      font-size: 13px;
+      width: 100%;
+    }
+
+    #add-domain-btn {
+      padding: 10px;
+      background: #4CAF50;
+      color: #000000;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    #add-domain-btn:hover {
+      background: #45a049;
+    }
+
+    .ignored-domains {
+      padding: 12px;
+      background: #1E1E1E;
+      border-radius: 8px;
+      border: 1px solid #333333;
+      font-size: 12px;
+      color: #B0B0B0;
+    }
+
+    .ignored-domains p {
+      margin: 4px 0;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .tab-btn {
+      padding: 10px;
+      background: #1E1E1E;
+      color: #E0E0E0;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .tab-btn.active {
+      background: #2A2A2A;
+    }
+
+    .tab-btn:hover {
+      background: #2A2A2A;
+    }
+
+    .tab-content {
+      padding: 16px;
+      background: #1E1E1E;
+      border-radius: 8px;
+      border: 1px solid #333333;
+    }
+
+    .tab {
+      display: none;
+    }
+
+    .tab.active {
+      display: block;
+    }
+
+    .server-config {
+      margin-bottom: 16px;
+    }
+
+    .input-group {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .input-group label {
+      margin-bottom: 4px;
+    }
+
+    .toggle-group {
+      margin-bottom: 12px;
+    }
+
+    .toggle-group label {
+      margin-bottom: 4px;
+    }
+
+    .settings-save-button {
+      width: 100%;
+      padding: 12px;
+      background: #4CAF50;
+      color: #000000;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+
+    .settings-save-button:hover {
+      background: #45a049;
+    }
+
+    .translation-toggle {
+      padding: 16px;
+    }
+
+    #translatePage {
+      width: 100%;
+      padding: 12px;
+      background: #4CAF50;
+      color: #000000;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+
+    #translatePage:hover {
+      background: #45a049;
+    }
+
+    .server-status-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-left: 8px;
+      vertical-align: middle;
+      transition: all 0.3s ease;
+    }
+
+    .server-status-indicator.checking {
+      background-color: #FFC107;
+      animation: pulse 1.5s infinite;
+    }
+
+    .server-status-indicator.success {
+      background-color: #4CAF50;
+    }
+
+    .server-status-indicator.error {
+      background-color: #f44336;
+    }
+
+    /* Keyboard Shortcuts Styles */
+    .keyboard-shortcuts {
+      background: #1E1E1E;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      display: none;
+      transition: all 0.3s ease;
+    }
+
+    .keyboard-shortcuts.visible {
+      display: block;
+    }
+
+    .keyboard-shortcuts h3 {
+      color: #4CAF50;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    .keyboard-shortcuts-list {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    .keyboard-shortcuts-list li {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .keyboard-shortcuts-list .shortcut-key {
+      background: #333333;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      margin-left: 10px;
+    }
+
+    .keyboard-shortcuts-toggle {
+      color: #4CAF50;
+      cursor: pointer;
+      font-size: 12px;
+      text-decoration: underline;
+      margin-top: 10px;
+      text-align: right;
+    }
+
+    .show-keyboard-shortcuts-btn {
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .show-keyboard-shortcuts-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo-section">
+        <img src="../assets/icon48.png" alt="QTEngineEx">
+        <h1>QTEngineEx</h1>
+      </div>
+      <svg class="settings-icon" id="settingsIcon" viewBox="0 0 24 24">
+        <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+      </svg>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="translation-settings">Translation</button>
+      <button class="tab-btn" data-tab="domain-settings">Domain Ignore</button>
+    </div>
+    
+    <div class="tab-content">
+      <div id="translation-settings" class="tab active">
+        <div class="translation-toggle">
+          <div class="toggle-group">
+            <span class="toggle-label">Auto Translate</span>
+            <label class="switch">
+              <input type="checkbox" id="autoTranslate">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button id="translatePage">Translate Page</button>
+        </div>
+      </div>
+      
+      <div id="domain-settings" class="tab">
+        <h3>Domain Ignore Management</h3>
+        <div class="domain-input-container">
+          <input type="text" id="domain-input" placeholder="Enter domain (e.g., example.com)">
+          <button id="add-domain-btn">Add to Ignore List</button>
+        </div>
+        <div id="ignored-domains-list" class="ignored-domains">
+          <!-- Dynamically populated list of ignored domains -->
+        </div>
+      </div>
+    </div>
+
+    <div class="keyboard-shortcuts" id="keyboardShortcuts">
+      <h3>Keyboard Shortcuts</h3>
+      <ul class="keyboard-shortcuts-list">
+        <li>
+          Toggle Full Page Translation
+          <span class="shortcut-key">Alt + T</span>
+        </li>
+        <li>
+          Show Keyboard Shortcuts Help
+          <span class="shortcut-key">Alt + K</span>
+        </li>
+        <li>
+          Translate Selected Text
+          <span class="shortcut-key">Select Text</span>
+        </li>
+      </ul>
+      <div class="keyboard-shortcuts-toggle" id="keyboardShortcutsToggle">
+        Hide Shortcuts
+      </div>
+    </div>
+
+    <div id="showKeyboardShortcutsBtn" class="show-keyboard-shortcuts-btn" style="
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: #4CAF50;
+      color: white;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      z-index: 1000;
+    ">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"></path>
+      </svg>
+    </div>
+
+    <div id="settingsPanel" class="settings-panel">
+      <div class="server-config">
+        <h3>Server Configuration</h3>
+        <div class="input-group">
+          <input type="text" id="serverUrlInput" placeholder="Enter server URL">
+          <button id="checkServerButton">Check Status</button>
+          <div id="serverStatusIndicator" class="server-status-indicator"></div>
+        </div>
+        <button id="saveSettingsButton" class="settings-save-button">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
