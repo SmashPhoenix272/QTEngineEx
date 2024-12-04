@@ -10,14 +10,6 @@ const contentMemory = {
 
 console.log('QTEngineEx Content Script Loaded');
 
-// Detect if text is Chinese
-function isChineseText(text) {
-  const chineseRegex = /[\u4E00-\u9FFF\u3400-\u4DBF\u20000-\u2A6DF\u2A700-\u2B73F\u2B740-\u2B81F\u2B820-\u2CEAF\uF900-\uFAFF\u3300-\u33FF\uFE30-\uFE4F]/;
-  const result = chineseRegex.test(text);
-  console.log('Chinese Text Check:', { text, result });
-  return result;
-}
-
 // Color palette for dark theme
 const UI_COLORS = {
   background: '#121212',     // Very dark background
@@ -54,7 +46,7 @@ function createTranslationBubble() {
   return bubble;
 }
 
-// Enhanced bubble positioning with more intelligent placement
+// Enhanced bubble positioning for mixed content
 function positionBubble(bubble, selection) {
   const range = selection.getRangeAt(0);
   const rect = range.getBoundingClientRect();
@@ -325,7 +317,7 @@ async function translateFullPage() {
       if (parent && 
           parent.tagName !== 'SCRIPT' && 
           parent.tagName !== 'STYLE' && 
-          isChineseText(node.textContent.trim())) {
+          node.textContent.trim().length > 1) {
         textNodes.push(node);
       }
     } else {
@@ -341,7 +333,7 @@ async function translateFullPage() {
     .filter(text => text.trim().length > 0)
     .join('\n');
 
-  console.log(`Found ${textNodes.length} Chinese text nodes to translate`);
+  console.log(`Found ${textNodes.length} text nodes to translate`);
 
   try {
     const response = await chrome.runtime.sendMessage({
@@ -427,12 +419,11 @@ function handleTextSelection(event) {
   const selectedText = selection.toString().trim();
   console.log('Selected text details:', {
     text: selectedText,
-    length: selectedText.length,
-    isChineseTxt: isChineseText(selectedText)
+    length: selectedText.length
   });
 
-  if (!selectedText || !isChineseText(selectedText)) {
-    console.log('Selected text is not Chinese or empty');
+  if (!selectedText || selectedText.length <= 1) {
+    console.log('Selected text is empty or too short');
     return;
   }
 
@@ -517,11 +508,8 @@ class DynamicContentTranslator {
 
   // Efficiently check if text needs translation
   shouldTranslateText(text) {
-    // Ignore very short or empty texts
-    if (!text || text.trim().length < 3) return false;
-    
-    // Check if text contains Chinese characters
-    return isChineseText(text);
+    // Only check for empty or very short text
+    return text && text.trim().length > 1;
   }
 
   // Translate a single text node
