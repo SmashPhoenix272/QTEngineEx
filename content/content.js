@@ -67,14 +67,27 @@ function createTranslationBubble() {
 
 // Normalize Vietnamese text
 function normalizeVietnameseText(text) {
-  // Normalize combining diacritical marks
-  text = text.normalize('NFC');
+  if (!text) return text;
   
-  // Fix common spacing issues with Vietnamese diacritics
-  const diacriticRegex = /\p{Mark}+/gu;
-  text = text.replace(diacriticRegex, (match) => match.trim());
+  // First normalize using NFC
+  let normalized = text.normalize('NFC');
   
-  return text;
+  // Replace any remaining combining marks that might be separated
+  const combiningMarks = /[\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g;
+  
+  // First collect all words with potential combining marks
+  const words = normalized.split(/\s+/);
+  normalized = words.map(word => {
+    // If word contains combining marks, ensure they're properly attached
+    if (combiningMarks.test(word)) {
+      return word.replace(/(.)([\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]+)/g, 
+        (_, char, marks) => (char + marks).normalize('NFC')
+      );
+    }
+    return word;
+  }).join(' ');
+  
+  return normalized.normalize('NFC');
 }
 
 // Enhanced bubble positioning for mixed content
@@ -547,12 +560,14 @@ class DynamicContentTranslator {
   async translateTextNode(textNode) {
     if (this.processedNodes.has(textNode)) return;
     
-    const originalText = textNode.textContent.trim();
+    // Normalize the input text before sending for translation
+    const originalText = normalizeVietnameseText(textNode.textContent.trim());
     if (!originalText) return;
     
     // Check cache first
     if (this.translationCache.has(originalText)) {
-      textNode.textContent = this.translationCache.get(originalText);
+      const cachedTranslation = this.translationCache.get(originalText);
+      textNode.textContent = normalizeVietnameseText(cachedTranslation);
       this.processedNodes.add(textNode);
       return;
     }
@@ -565,11 +580,15 @@ class DynamicContentTranslator {
       });
 
       if (response.translation) {
-        // Normalize Vietnamese text before setting
+        // Double-check normalization of the response
         const normalizedTranslation = normalizeVietnameseText(response.translation);
-        textNode.textContent = normalizedTranslation;
+        
+        // Create a new text node to ensure clean rendering
+        const newTextNode = document.createTextNode(normalizedTranslation);
+        textNode.parentNode.replaceChild(newTextNode, textNode);
+        
         this.translationCache.set(originalText, normalizedTranslation);
-        this.processedNodes.add(textNode);
+        this.processedNodes.add(newTextNode);
       }
     } catch (error) {
       console.error('Dynamic translation error:', error);
