@@ -24,6 +24,10 @@ const UI_COLORS = {
 
 // Create translation bubble element
 function createTranslationBubble() {
+  if (document.getElementById('qt-translation-bubble')) {
+    return document.getElementById('qt-translation-bubble');
+  }
+  
   const bubble = document.createElement('div');
   bubble.id = 'qt-translation-bubble';
   bubble.style.cssText = `
@@ -36,14 +40,41 @@ function createTranslationBubble() {
     box-shadow: 0 4px 10px ${UI_COLORS.shadow};
     max-width: 350px;
     min-width: 250px;
-    z-index: 10000;
+    z-index: 2147483647;
     font-size: 16px;
     line-height: 1.6;
     color: ${UI_COLORS.text};
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    pointer-events: auto;
   `;
-  document.body.appendChild(bubble);
+  
+  // Create a container for the bubble to ensure it stays on top
+  const container = document.createElement('div');
+  container.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2147483647;
+  `;
+  
+  container.appendChild(bubble);
+  document.body.appendChild(container);
   return bubble;
+}
+
+// Normalize Vietnamese text
+function normalizeVietnameseText(text) {
+  // Normalize combining diacritical marks
+  text = text.normalize('NFC');
+  
+  // Fix common spacing issues with Vietnamese diacritics
+  const diacriticRegex = /\p{Mark}+/gu;
+  text = text.replace(diacriticRegex, (match) => match.trim());
+  
+  return text;
 }
 
 // Enhanced bubble positioning for mixed content
@@ -514,10 +545,10 @@ class DynamicContentTranslator {
 
   // Translate a single text node
   async translateTextNode(textNode) {
-    // Prevent re-translating nodes
     if (this.processedNodes.has(textNode)) return;
     
     const originalText = textNode.textContent.trim();
+    if (!originalText) return;
     
     // Check cache first
     if (this.translationCache.has(originalText)) {
@@ -534,9 +565,10 @@ class DynamicContentTranslator {
       });
 
       if (response.translation) {
-        // Update text and cache
-        textNode.textContent = response.translation;
-        this.translationCache.set(originalText, response.translation);
+        // Normalize Vietnamese text before setting
+        const normalizedTranslation = normalizeVietnameseText(response.translation);
+        textNode.textContent = normalizedTranslation;
+        this.translationCache.set(originalText, normalizedTranslation);
         this.processedNodes.add(textNode);
       }
     } catch (error) {
@@ -577,15 +609,51 @@ class DynamicContentTranslator {
 
   // Start observing dynamic content
   start() {
-    // Prevent multiple observers
-    if (this.observer) return;
+    if (this.observer) {
+      this.stop();
+    }
 
-    this.observer = new MutationObserver((mutations) => {
-      this.handleMutations(mutations);
-    });
+    // Initialize a retry counter
+    let retryCount = 0;
+    const maxRetries = 3;
 
-    this.observer.observe(document.body, this.config);
-    console.log('Dynamic Content Translator started');
+    const initializeObserver = () => {
+      try {
+        this.observer = new MutationObserver((mutations) => {
+          // Use requestIdleCallback to avoid blocking the main thread
+          if (window.requestIdleCallback) {
+            window.requestIdleCallback(() => this.handleMutations(mutations));
+          } else {
+            setTimeout(() => this.handleMutations(mutations), 0);
+          }
+        });
+
+        // Start with a smaller batch of mutations
+        const observerConfig = {
+          ...this.config,
+          characterDataOldValue: true
+        };
+
+        this.observer.observe(document.body, observerConfig);
+        console.log('Dynamic Content Translator started successfully');
+
+        // Initial scan of existing content
+        this.processNode(document.body);
+      } catch (error) {
+        console.error('Failed to start observer:', error);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          setTimeout(initializeObserver, 1000 * retryCount);
+        }
+      }
+    };
+
+    // Wait for document to be ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initializeObserver);
+    } else {
+      initializeObserver();
+    }
   }
 
   // Stop observing
