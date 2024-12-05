@@ -558,21 +558,31 @@ class DynamicContentTranslator {
 
   // Translate a single text node
   async translateTextNode(textNode) {
-    if (this.processedNodes.has(textNode)) return;
-    
-    // Normalize the input text before sending for translation
-    const originalText = normalizeVietnameseText(textNode.textContent.trim());
-    if (!originalText) return;
-    
-    // Check cache first
-    if (this.translationCache.has(originalText)) {
-      const cachedTranslation = this.translationCache.get(originalText);
-      textNode.textContent = normalizeVietnameseText(cachedTranslation);
-      this.processedNodes.add(textNode);
-      return;
-    }
-
     try {
+      // Skip if already processed
+      if (this.processedNodes.has(textNode)) return;
+      
+      // Skip if node is not valid
+      if (!textNode || !textNode.textContent) {
+        console.debug('Invalid text node encountered');
+        return;
+      }
+      
+      // Normalize the input text before sending for translation
+      const originalText = normalizeVietnameseText(textNode.textContent.trim());
+      if (!originalText) return;
+      
+      // Check cache first
+      if (this.translationCache.has(originalText)) {
+        const cachedTranslation = this.translationCache.get(originalText);
+        if (textNode.parentNode) { // Check parent exists before modifying
+          // Use direct text content update instead of node replacement
+          textNode.textContent = normalizeVietnameseText(cachedTranslation);
+          this.processedNodes.add(textNode);
+        }
+        return;
+      }
+
       const response = await chrome.runtime.sendMessage({
         type: 'translate',
         text: originalText,
@@ -580,48 +590,71 @@ class DynamicContentTranslator {
       });
 
       if (response.translation) {
+        // Verify node is still in document and has parent
+        if (!textNode.parentNode) {
+          console.debug('Text node no longer in document');
+          return;
+        }
+
         // Double-check normalization of the response
         const normalizedTranslation = normalizeVietnameseText(response.translation);
         
-        // Create a new text node to ensure clean rendering
-        const newTextNode = document.createTextNode(normalizedTranslation);
-        textNode.parentNode.replaceChild(newTextNode, textNode);
-        
+        // Use direct text content update instead of node replacement
+        textNode.textContent = normalizedTranslation;
         this.translationCache.set(originalText, normalizedTranslation);
-        this.processedNodes.add(newTextNode);
+        this.processedNodes.add(textNode);
       }
     } catch (error) {
-      console.error('Dynamic translation error:', error);
+      console.error('Dynamic translation error:', {
+        error: error.message,
+        nodeContent: textNode?.textContent,
+        hasParent: !!textNode?.parentNode
+      });
     }
   }
 
-  // Recursively find and translate text nodes
-  async processNode(node) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (this.shouldTranslateText(node.textContent)) {
-        await this.translateTextNode(node);
+  // Recursively find and translate text nodes with debounce
+  processNode(node) {
+    if (!node) return;
+
+    const processTextNode = async (textNode) => {
+      if (this.shouldTranslateText(textNode.textContent)) {
+        await this.translateTextNode(textNode);
       }
+    };
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      processTextNode(node);
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       // Skip script and style tags
-      if (node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') {
-        for (const childNode of node.childNodes) {
-          await this.processNode(childNode);
-        }
+      const tagName = node.tagName?.toUpperCase();
+      if (tagName !== 'SCRIPT' && tagName !== 'STYLE') {
+        // Create a static array from childNodes to avoid live NodeList issues
+        Array.from(node.childNodes).forEach(childNode => {
+          this.processNode(childNode);
+        });
       }
     }
   }
 
-  // Main mutation handler
-  async handleMutations(mutations) {
+  // Main mutation handler with debounce
+  handleMutations(mutations) {
     if (!isAutoTranslateEnabled) return;
 
+    // Process mutations with debounce
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         for (const node of mutation.addedNodes) {
-          await this.processNode(node);
+          // Skip if node is no longer in document
+          if (document.contains(node)) {
+            this.processNode(node);
+          }
         }
       } else if (mutation.type === 'characterData') {
-        await this.processNode(mutation.target);
+        // Skip if node is no longer in document
+        if (document.contains(mutation.target)) {
+          this.processNode(mutation.target);
+        }
       }
     }
   }
