@@ -293,68 +293,8 @@ function togglePageTranslation() {
   if (!toggleButton) return;
 
   const textNodes = [];
-  function collectTextNodes(node) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const parent = node.parentElement;
-      if (parent && 
-          parent.tagName !== 'SCRIPT' && 
-          parent.tagName !== 'STYLE') {
-        textNodes.push(node);
-      }
-    } else {
-      for (let child of node.childNodes) {
-        collectTextNodes(child);
-      }
-    }
-  }
-  collectTextNodes(document.body);
-
-  if (isFullPageTranslated) {
-    // Switch back to original
-    textNodes.forEach(node => {
-      const originalText = contentMemory.originalTexts.get(node);
-      if (originalText) {
-        node.textContent = originalText;
-      }
-    });
-    
-    toggleButton.textContent = 'Show Translated';
-    isFullPageTranslated = false;
-  } else {
-    // Switch to translated
-    textNodes.forEach(node => {
-      // Store original text if not already stored
-      if (!contentMemory.originalTexts.has(node)) {
-        contentMemory.originalTexts.set(node, node.textContent);
-      }
-      
-      const translatedText = contentMemory.translatedTexts.get(node);
-      if (translatedText) {
-        node.textContent = translatedText;
-      }
-    });
-    
-    toggleButton.textContent = 'Show Original';
-    isFullPageTranslated = true;
-  }
-}
-
-// Translate entire page
-async function translateFullPage() {
-  console.log('Starting full page translation');
+  const textGroups = new Map(); // Define textGroups in the correct scope
   
-  // Prevent multiple translations
-  if (isFullPageTranslated) {
-    console.log('Page already translated');
-    return;
-  }
-
-  // Create a loading indicator with new dark theme style
-  const loadingIndicator = createLoadingIndicator();
-  loadingIndicator.textContent = 'Translating page...';
-  document.body.appendChild(loadingIndicator);
-
-  const textNodes = [];
   function collectTextNodes(node) {
     if (node.nodeType === Node.TEXT_NODE) {
       const parent = node.parentElement;
@@ -362,7 +302,41 @@ async function translateFullPage() {
           parent.tagName !== 'SCRIPT' && 
           parent.tagName !== 'STYLE' && 
           node.textContent.trim().length > 1) {
-        textNodes.push(node);
+        
+        // Get structural path to identify similar content
+        let structuralPath = '';
+        let current = parent;
+        while (current && current !== document.body) {
+          structuralPath = current.tagName + (current.className ? '.' + current.className : '') + '>' + structuralPath;
+          current = current.parentElement;
+        }
+
+        // Handle text content more carefully
+        const text = node.textContent;
+        const lines = text.split('\n');
+        const isMultiline = lines.length > 1;
+
+        const nodeInfo = {
+          node: node,
+          text: text,
+          structuralPath: structuralPath,
+          isMultiline: isMultiline,
+          originalFormat: {
+            lines: lines,
+            lineBreaks: text.match(/\n/g)?.length || 0,
+            leading: text.match(/^\s+/)?.[0] || '',
+            trailing: text.match(/\s+$/)?.[0] || ''
+          }
+        };
+
+        textNodes.push(nodeInfo);
+        
+        // Group similar nodes together, but keep multiline content separate
+        const groupKey = isMultiline ? structuralPath + '_multiline' : structuralPath;
+        if (!textGroups.has(groupKey)) {
+          textGroups.set(groupKey, []);
+        }
+        textGroups.get(groupKey).push(nodeInfo);
       }
     } else {
       for (let child of node.childNodes) {
@@ -372,67 +346,215 @@ async function translateFullPage() {
   }
   collectTextNodes(document.body);
 
-  const textToTranslate = textNodes
-    .map(node => node.textContent)
-    .filter(text => text.trim().length > 0)
-    .join('\n');
+  if (isFullPageTranslated) {
+    // Stop dynamic translator before switching back to original
+    if (isAutoTranslateEnabled) {
+      dynamicTranslator.stop();
+      // Clear processed nodes to allow re-translation when switching back
+      dynamicTranslator.processedNodes = new WeakSet();
+    }
 
+    // Switch back to original
+    textNodes.forEach(node => {
+      const originalText = contentMemory.originalTexts.get(node.node);
+      if (originalText) {
+        node.node.textContent = originalText;
+      }
+    });
+    toggleButton.textContent = 'Show Translated';
+    isFullPageTranslated = false;
+  } else {
+    // Switch to translated
+    textNodes.forEach(node => {
+      if (!contentMemory.originalTexts.has(node.node)) {
+        contentMemory.originalTexts.set(node.node, node.node.textContent);
+      }
+      const translatedText = contentMemory.translatedTexts.get(node.node);
+      if (translatedText) {
+        node.node.textContent = translatedText;
+      }
+    });
+    toggleButton.textContent = 'Show Original';
+    isFullPageTranslated = true;
+    
+    // Restart dynamic translator after switching to translated
+    if (isAutoTranslateEnabled) {
+      dynamicTranslator.start();
+    }
+  }
+}
+
+// Translate entire page
+async function translateFullPage() {
+  console.log('Starting full page translation');
+  
+  if (isFullPageTranslated) {
+    console.log('Page already translated');
+    return;
+  }
+
+  const loadingIndicator = createLoadingIndicator();
+  loadingIndicator.textContent = 'Translating page...';
+  document.body.appendChild(loadingIndicator);
+
+  const textNodes = [];
+  const textGroups = new Map();
+  
+  function collectTextNodes(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parent = node.parentElement;
+      if (parent && 
+          parent.tagName !== 'SCRIPT' && 
+          parent.tagName !== 'STYLE' && 
+          node.textContent.trim().length > 1) {
+        
+        // Get structural path
+        let structuralPath = '';
+        let current = parent;
+        let index = 0;
+        while (current && current !== document.body) {
+          const siblings = Array.from(current.parentElement?.children || []);
+          const position = siblings.indexOf(current);
+          structuralPath = `${current.tagName}[${position}]>${structuralPath}`;
+          current = current.parentElement;
+          index++;
+        }
+
+        // Create a unique key for each distinct content block
+        const contentHash = node.textContent.trim().slice(0, 50);
+        const uniqueKey = `${structuralPath}#${contentHash}`;
+
+        // Preserve newlines and structure
+        const text = node.textContent;
+        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        const lineBreaks = text.match(/\n/g)?.length || 0;
+        const originalStructure = text.split('\n').map(line => ({
+          content: line.trim(),
+          indent: line.match(/^\s*/)[0],
+          trailing: line.match(/\s*$/)[0]
+        }));
+
+        const nodeInfo = {
+          node: node,
+          text: text,
+          lines: lines,
+          structuralPath: structuralPath,
+          uniqueKey: uniqueKey,
+          originalFormat: {
+            structure: originalStructure,
+            lineBreaks: lineBreaks,
+            leading: text.match(/^\s+/)?.[0] || '',
+            trailing: text.match(/\s+$/)?.[0] || '',
+            hasNewlines: lineBreaks > 0
+          }
+        };
+
+        textNodes.push(nodeInfo);
+        
+        if (!textGroups.has(uniqueKey)) {
+          textGroups.set(uniqueKey, []);
+        }
+        textGroups.get(uniqueKey).push(nodeInfo);
+      }
+    } else {
+      for (let child of node.childNodes) {
+        collectTextNodes(child);
+      }
+    }
+  }
+  
+  collectTextNodes(document.body);
   console.log(`Found ${textNodes.length} text nodes to translate`);
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'translate',
-      text: textToTranslate,
-      mode: 'full-page'
-    });
+    for (const [key, nodes] of textGroups) {
+      // For each node in the group, preserve its structure
+      for (const nodeInfo of nodes) {
+        if (!contentMemory.originalTexts.has(nodeInfo.node)) {
+          contentMemory.originalTexts.set(nodeInfo.node, nodeInfo.node.textContent);
+        }
 
-    if (response.error) {
-      throw new Error(response.error);
+        // If the text has multiple lines, translate each line separately
+        if (nodeInfo.originalFormat.hasNewlines && nodeInfo.lines.length > 0) {
+          const response = await chrome.runtime.sendMessage({
+            type: 'translate',
+            text: nodeInfo.lines.join('\n'),
+            mode: 'full-page'
+          });
+
+          if (response.error) {
+            throw new Error(response.error);
+          }
+
+          // Split translated text back into lines and clean up any remaining original text
+          const translatedLines = response.translation
+            .split('\n')
+            .map(line => {
+              // Remove any remaining original Chinese/Japanese/Korean text
+              return line.replace(/[\u4e00-\u9fff\u3040-\u30ff\u3400-\u4dbf]+/g, '').trim();
+            })
+            .filter(line => line.length > 0); // Remove empty lines after cleanup
+
+          // Reconstruct the text with original formatting
+          let finalText = '';
+          let translatedIndex = 0;
+          
+          nodeInfo.originalFormat.structure.forEach((lineFormat, index) => {
+            if (translatedIndex < translatedLines.length) {
+              if (index > 0) finalText += '\n';
+              finalText += lineFormat.indent + translatedLines[translatedIndex].trim() + lineFormat.trailing;
+              translatedIndex++;
+            }
+          });
+
+          // Apply the translation with preserved structure
+          finalText = nodeInfo.originalFormat.leading + finalText.trim() + nodeInfo.originalFormat.trailing;
+          contentMemory.translatedTexts.set(nodeInfo.node, finalText);
+          nodeInfo.node.textContent = finalText;
+        } else {
+          // Single line translation
+          const response = await chrome.runtime.sendMessage({
+            type: 'translate',
+            text: nodeInfo.text.trim(),
+            mode: 'full-page'
+          });
+
+          if (response.error) {
+            throw new Error(response.error);
+          }
+
+          // Clean up any remaining original text from the translation
+          const cleanTranslation = response.translation
+            .replace(/[\u4e00-\u9fff\u3040-\u30ff\u3400-\u4dbf]+/g, '')
+            .trim();
+
+          const finalText = nodeInfo.originalFormat.leading + 
+                          cleanTranslation + 
+                          nodeInfo.originalFormat.trailing;
+          
+          contentMemory.translatedTexts.set(nodeInfo.node, finalText);
+          nodeInfo.node.textContent = finalText;
+        }
+      }
     }
-
-    const translatedTexts = response.translation.split('\n');
-    let translatedIndex = 0;
-
-    textNodes.forEach(node => {
-      // Store original text
-      if (!contentMemory.originalTexts.has(node)) {
-        contentMemory.originalTexts.set(node, node.textContent);
-      }
-
-      // Store and apply translated text
-      if (translatedIndex < translatedTexts.length) {
-        const translatedText = translatedTexts[translatedIndex];
-        contentMemory.translatedTexts.set(node, translatedText);
-        node.textContent = translatedText;
-        translatedIndex++;
-      }
-    });
 
     isFullPageTranslated = true;
     loadingIndicator.textContent = 'Translation complete';
     
-    // Create and add translation toggle button
     const toggleButton = createTranslationToggleButton();
+    document.body.appendChild(toggleButton);
     
-    // Log additional debugging information
-    console.log('Attempting to append toggle button to document body', {
-      bodyExists: !!document.body,
-      buttonExists: !!toggleButton
-    });
-    
-    // Ensure button is added even if it seems not to be
-    if (document.body && toggleButton) {
-      document.body.appendChild(toggleButton);
-      console.log('Toggle button appended to body');
-    } else {
-      console.error('Could not append toggle button - body or button is missing');
+    if (isAutoTranslateEnabled) {
+      dynamicTranslator.start();
     }
 
-    setTimeout(() => loadingIndicator.remove(), 2000);
   } catch (error) {
-    console.error('Full page translation failed:', error);
-    loadingIndicator.textContent = `Translation failed: ${error.message}`;
-    setTimeout(() => loadingIndicator.remove(), 3000);
+    console.error('Translation error:', error);
+    loadingIndicator.textContent = 'Translation failed: ' + error.message;
+  } finally {
+    setTimeout(() => {
+      loadingIndicator.remove();
+    }, 2000);
   }
 }
 
@@ -571,11 +693,18 @@ class DynamicContentTranslator {
       // Normalize the input text before sending for translation
       const originalText = normalizeVietnameseText(textNode.textContent.trim());
       if (!originalText) return;
+
+      // Store original text in contentMemory if not already stored
+      if (!contentMemory.originalTexts.has(textNode)) {
+        contentMemory.originalTexts.set(textNode, textNode.textContent);
+      }
       
       // Check cache first
       if (this.translationCache.has(originalText)) {
         const cachedTranslation = this.translationCache.get(originalText);
         if (textNode.parentNode) { // Check parent exists before modifying
+          // Store translated text in contentMemory
+          contentMemory.translatedTexts.set(textNode, cachedTranslation);
           // Use direct text content update instead of node replacement
           textNode.textContent = normalizeVietnameseText(cachedTranslation);
           this.processedNodes.add(textNode);
@@ -599,6 +728,8 @@ class DynamicContentTranslator {
         // Double-check normalization of the response
         const normalizedTranslation = normalizeVietnameseText(response.translation);
         
+        // Store translated text in contentMemory
+        contentMemory.translatedTexts.set(textNode, normalizedTranslation);
         // Use direct text content update instead of node replacement
         textNode.textContent = normalizedTranslation;
         this.translationCache.set(originalText, normalizedTranslation);
