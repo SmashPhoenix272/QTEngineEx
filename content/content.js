@@ -91,7 +91,13 @@ function normalizeVietnameseText(text) {
 }
 
 // Enhanced bubble positioning for mixed content
+// Keep track of current selection for repositioning
+let currentSelection = null;
+
 function positionBubble(bubble, selection) {
+  // Store selection for scroll handler
+  currentSelection = selection;
+  
   const range = selection.getRangeAt(0);
   const rect = range.getBoundingClientRect();
   
@@ -99,26 +105,34 @@ function positionBubble(bubble, selection) {
   const viewportHeight = window.innerHeight;
   const bubbleWidth = 350;  // Max width from previous implementation
   const bubbleHeight = bubble.offsetHeight;
+  const verticalSpacing = 10;
   
-  // Horizontal positioning with edge detection
-  let leftPosition = rect.left + window.scrollX;
+  // Horizontal positioning with edge detection (relative to viewport for fixed positioning)
+  let leftPosition = rect.left;  // Remove window.scrollX since using fixed positioning
   if (leftPosition + bubbleWidth > viewportWidth) {
     leftPosition = viewportWidth - bubbleWidth - 20;  // 20px padding
   }
   
-  // Vertical positioning with smarter placement
-  const verticalSpacing = 10;
-  const topPosition = rect.bottom + window.scrollY + verticalSpacing;
-  const bottomPosition = rect.top + window.scrollY - bubbleHeight - verticalSpacing;
+  // Calculate available space above and below selection
+  const spaceAbove = rect.top;
+  const spaceBelow = viewportHeight - rect.bottom;
   
-  const shouldPositionAbove = 
-    (topPosition + bubbleHeight > viewportHeight + window.scrollY) ||
-    (bottomPosition > 0);
+  // Determine vertical position based on available space
+  let topPosition;
+  const shouldPositionAbove = (spaceBelow < bubbleHeight + verticalSpacing) &&
+                             (spaceAbove >= bubbleHeight + verticalSpacing);
   
+  if (shouldPositionAbove) {
+    // Position above the selection if there's more space above or not enough space below
+    topPosition = rect.top - bubbleHeight - verticalSpacing;  // Remove window.scrollY
+  } else {
+    // Position below the selection (default)
+    topPosition = rect.bottom + verticalSpacing;  // Remove window.scrollY
+  }
+  
+  // Apply positions
   bubble.style.left = `${Math.max(0, leftPosition)}px`;
-  bubble.style.top = shouldPositionAbove 
-    ? `${bottomPosition}px`
-    : `${topPosition}px`;
+  bubble.style.top = `${topPosition}px`;
   
   // Smooth animation
   bubble.style.opacity = '0';
@@ -129,6 +143,16 @@ function positionBubble(bubble, selection) {
   bubble.offsetHeight;
   bubble.style.opacity = '1';
 }
+
+// Update bubble position on scroll
+function updateBubblePosition() {
+  if (translationBubble && currentSelection && translationBubble.style.display !== 'none') {
+    positionBubble(translationBubble, currentSelection);
+  }
+}
+
+// Add scroll event listener
+window.addEventListener('scroll', updateBubblePosition, { passive: true });
 
 // Enhanced accessibility and keyboard navigation
 function setupAccessibilityFeatures() {
