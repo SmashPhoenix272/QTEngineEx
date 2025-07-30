@@ -10,6 +10,100 @@ const contentMemory = {
 
 console.log('QTEngineEx Content Script Loaded');
 
+// API endpoint constant for Bilibili comments
+const BILIBILI_API_PREFIX = 'https://api.bilibili.com/x/v2/reply';
+
+// Store original fetch for interception
+const originalFetch = window.fetch;
+
+// Intercept fetch requests
+window.fetch = async function(...args) {
+  const response = await originalFetch(...args);
+  
+  if (response.status === 200 &&
+      response.url.startsWith(BILIBILI_API_PREFIX) &&
+      response.headers.get('content-type')?.includes('application/json')) {
+    
+    const clone = response.clone();
+    try {
+      const json = await clone.json();
+      if (json.code === 0 && json.data?.replies) {
+        // Process both main replies and nested replies
+        setTimeout(() => {
+          if (Array.isArray(json.data.replies)) {
+            processNewComments(json.data.replies);
+          }
+          if (Array.isArray(json.data.top_replies)) {
+            processNewComments(json.data.top_replies);
+          }
+        }, 50);
+      }
+    } catch (err) {
+      console.error('Error processing Bilibili API response:', err);
+    }
+  }
+  return response;
+};
+
+// Intercept XMLHttpRequest
+const XHRProto = XMLHttpRequest.prototype;
+const originalOpen = XHRProto.open;
+const originalSend = XHRProto.send;
+
+XHRProto.open = function(method, url) {
+  this._url = url;
+  return originalOpen.apply(this, arguments);
+};
+
+XHRProto.send = function() {
+  const originalOnReadyStateChange = this.onreadystatechange;
+  
+  this.onreadystatechange = function() {
+    if (this.readyState === 4 && this.status === 200 &&
+        this._url.startsWith(BILIBILI_API_PREFIX)) {
+      try {
+        const json = JSON.parse(this.responseText);
+        if (json.code === 0 && json.data?.replies) {
+          setTimeout(() => {
+            if (Array.isArray(json.data.replies)) {
+              processNewComments(json.data.replies);
+            }
+            if (Array.isArray(json.data.top_replies)) {
+              processNewComments(json.data.top_replies);
+            }
+          }, 50);
+        }
+      } catch (err) {
+        console.error('Error processing Bilibili XHR response:', err);
+      }
+    }
+    
+    if (originalOnReadyStateChange) {
+      originalOnReadyStateChange.apply(this, arguments);
+    }
+  };
+  
+  return originalSend.apply(this, arguments);
+};
+
+// Process new comments from API responses
+function processNewComments(replies) {
+  replies.forEach(reply => {
+    // Process main reply
+    if (reply.reply_control?.location) {
+      const mainNode = document.querySelector(`bili-comment-thread-renderer[data-id="${reply.rpid}"]`);
+      if (mainNode?.shadowRoot) {
+        collectTextNodes(mainNode.shadowRoot);
+      }
+    }
+    
+    // Process nested replies
+    if (Array.isArray(reply.replies)) {
+      processNewComments(reply.replies);
+    }
+  });
+}
+
 // Color palette for dark theme
 const UI_COLORS = {
   background: '#121212',     // Very dark background
@@ -310,6 +404,32 @@ function createLoadingIndicator() {
   return loadingIndicator;
 }
 
+// Apply word wrap styles to the entire page
+function applyWordWrapStyles() {
+  const styleId = 'qt-word-wrap-style';
+  if (document.getElementById(styleId)) {
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+    body, body * {
+      word-wrap: break-word !important;
+      word-break: break-word !important;
+      white-space: normal !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// Remove word wrap styles
+function removeWordWrapStyles() {
+  const styleElement = document.getElementById('qt-word-wrap-style');
+  if (styleElement) {
+    styleElement.remove();
+  }
+}
 // Toggle page translation
 function togglePageTranslation() {
   const toggleButton = document.getElementById('qt-translation-toggle');
@@ -319,12 +439,48 @@ function togglePageTranslation() {
   const textNodes = [];
   const textGroups = new Map(); // Define textGroups in the correct scope
   
+  // Helper function to process comment node contents
+  function processCommentNode(node) {
+    if (!node) return;
+    const textElements = node.querySelectorAll('.content');
+    textElements.forEach(element => {
+      collectTextNodes(element);
+    });
+  }
+  
   function collectTextNodes(node) {
+    // Handle Bilibili comments with exact path structure
+    if (node === document.body) {
+      const commentsRoot = document.querySelector('#commentapp > bili-comments');
+      if (commentsRoot?.shadowRoot) {
+        const comments = commentsRoot.shadowRoot.querySelectorAll('#feed > bili-comment-thread-renderer');
+        comments.forEach(comment => {
+          // Handle main comment content
+          const mainComment = comment.shadowRoot?.querySelector('#comment')?.shadowRoot;
+          if (mainComment) {
+            processCommentNode(mainComment);
+          }
+          
+          // Handle reply content
+          const replies = comment.shadowRoot?.querySelector('#replies bili-comment-replies-renderer')?.shadowRoot
+            ?.querySelectorAll('#expander-contents bili-comment-reply-renderer');
+          if (replies) {
+            replies.forEach(reply => {
+              if (reply.shadowRoot) {
+                processCommentNode(reply.shadowRoot);
+              }
+            });
+          }
+        });
+      }
+    }
+
+    // Handle regular text nodes
     if (node.nodeType === Node.TEXT_NODE) {
       const parent = node.parentElement;
-      if (parent && 
-          parent.tagName !== 'SCRIPT' && 
-          parent.tagName !== 'STYLE' && 
+      if (parent &&
+          parent.tagName !== 'SCRIPT' &&
+          parent.tagName !== 'STYLE' &&
           node.textContent.trim().length > 1) {
         
         // Get structural path to identify similar content
@@ -385,10 +541,12 @@ function togglePageTranslation() {
         node.node.textContent = originalText;
       }
     });
+    removeWordWrapStyles();
     toggleButton.textContent = 'Show Translated';
     isFullPageTranslated = false;
   } else {
     // Switch to translated
+    applyWordWrapStyles();
     textNodes.forEach(node => {
       if (!contentMemory.originalTexts.has(node.node)) {
         contentMemory.originalTexts.set(node.node, node.node.textContent);
@@ -424,12 +582,48 @@ async function translateFullPage() {
   const textNodes = [];
   const textGroups = new Map();
   
+  // Helper function to process comment node contents
+  function processCommentNode(node) {
+    if (!node) return;
+    const textElements = node.querySelectorAll('.content');
+    textElements.forEach(element => {
+      collectTextNodes(element);
+    });
+  }
+  
   function collectTextNodes(node) {
+    // Handle Bilibili comments with exact path structure
+    if (node === document.body) {
+      const commentsRoot = document.querySelector('#commentapp > bili-comments');
+      if (commentsRoot?.shadowRoot) {
+        const comments = commentsRoot.shadowRoot.querySelectorAll('#feed > bili-comment-thread-renderer');
+        comments.forEach(comment => {
+          // Handle main comment content
+          const mainComment = comment.shadowRoot?.querySelector('#comment')?.shadowRoot;
+          if (mainComment) {
+            processCommentNode(mainComment);
+          }
+          
+          // Handle reply content
+          const replies = comment.shadowRoot?.querySelector('#replies bili-comment-replies-renderer')?.shadowRoot
+            ?.querySelectorAll('#expander-contents bili-comment-reply-renderer');
+          if (replies) {
+            replies.forEach(reply => {
+              if (reply.shadowRoot) {
+                processCommentNode(reply.shadowRoot);
+              }
+            });
+          }
+        });
+      }
+    }
+
+    // Regular text node processing
     if (node.nodeType === Node.TEXT_NODE) {
       const parent = node.parentElement;
-      if (parent && 
-          parent.tagName !== 'SCRIPT' && 
-          parent.tagName !== 'STYLE' && 
+      if (parent &&
+          parent.tagName !== 'SCRIPT' &&
+          parent.tagName !== 'STYLE' &&
           node.textContent.trim().length > 1) {
         
         // Get structural path
@@ -511,7 +705,7 @@ async function translateFullPage() {
           }
 
           // Split translated text back into lines and clean up any remaining original text
-          const translatedLines = response.translation
+          const translatedLines = normalizeVietnameseText(response.translation)
             .split('\n')
             .map(line => {
               // Remove any remaining original Chinese/Japanese/Korean text
@@ -548,7 +742,7 @@ async function translateFullPage() {
           }
 
           // Clean up any remaining original text from the translation
-          const cleanTranslation = response.translation
+          const cleanTranslation = normalizeVietnameseText(response.translation)
             .replace(/[\u4e00-\u9fff\u3040-\u30ff\u3400-\u4dbf]+/g, '')
             .trim();
 
@@ -563,6 +757,7 @@ async function translateFullPage() {
     }
 
     isFullPageTranslated = true;
+    applyWordWrapStyles();
     loadingIndicator.textContent = 'Translation complete';
     
     const toggleButton = createTranslationToggleButton();
@@ -696,6 +891,50 @@ class DynamicContentTranslator {
     };
   }
 
+  // Setup JSONP observer for Bilibili comment loading
+  setupJSONPObserver() {
+    if (this.jsonpObserver) return;
+
+    this.jsonpObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeName === 'SCRIPT' && node.src) {
+            const url = new URL(node.src);
+            if (url.searchParams.has('callback')) {
+              const callbackName = url.searchParams.get('callback');
+              const originalCallback = window[callbackName];
+              
+              window[callbackName] = (data) => {
+                // Process Bilibili API response
+                if (url.href.startsWith(BILIBILI_API_PREFIX) && data?.code === 0) {
+                  setTimeout(() => {
+                    if (Array.isArray(data.data?.replies)) {
+                      processNewComments(data.data.replies);
+                    }
+                    if (Array.isArray(data.data?.top_replies)) {
+                      processNewComments(data.data.top_replies);
+                    }
+                  }, 50);
+                }
+                
+                // Call original callback
+                if (originalCallback) {
+                  originalCallback(data);
+                }
+              };
+            }
+          }
+        });
+      });
+    });
+
+    // Start observing document.head for script additions
+    this.jsonpObserver.observe(document.head, {
+      childList: true
+    });
+    console.log('JSONP observer started');
+  }
+
   // Efficiently check if text needs translation
   shouldTranslateText(text) {
     // Only check for empty or very short text
@@ -820,6 +1059,9 @@ class DynamicContentTranslator {
       this.stop();
     }
 
+    // Setup JSONP interception
+    this.setupJSONPObserver();
+
     // Initialize a retry counter
     let retryCount = 0;
     const maxRetries = 3;
@@ -868,8 +1110,12 @@ class DynamicContentTranslator {
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;
-      console.log('Dynamic Content Translator stopped');
     }
+    if (this.jsonpObserver) {
+      this.jsonpObserver.disconnect();
+      this.jsonpObserver = null;
+    }
+    console.log('Dynamic Content Translator stopped');
   }
 }
 
